@@ -2,8 +2,10 @@ from aiogram import Bot, types, Dispatcher
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from database import add_achievement, delete_achievement, get_achievements, get_pending_achievements, update_achievement_status
-from keyboards import get_main_menu, get_back_menu, get_view_achievements_menu, get_back_to_achievements_menu, get_approval_menu
+from keyboards import get_main_menu, get_back_menu, get_view_achievements_menu, get_back_to_achievements_menu, get_approval_menu, get_auth_menu
 from models import Achievement
+from functools import partial
+from handlers.auth_handlers import AuthState
 
 class AddAchievement(StatesGroup):
     waiting_for_description = State()
@@ -21,17 +23,31 @@ class ApproveAchievement(StatesGroup):
     viewing_achievement = State()
 
 def register_handlers(dp: Dispatcher, bot: Bot):
-    dp.register_message_handler(send_welcome, commands=['start'], state='*')
-    dp.register_callback_query_handler(lambda c: process_add_achievement(c, bot), lambda c: c.data == 'add_achievement', state='*')
-    dp.register_callback_query_handler(lambda c: process_delete_achievement(c, bot), lambda c: c.data == 'delete_achievement', state='*')
-    dp.register_callback_query_handler(lambda c: process_view_achievements(c, bot), lambda c: c.data == 'view_achievements', state='*')
-    dp.register_callback_query_handler(lambda c: process_view_achievement_details(c, bot), lambda c: c.data == 'view_achievement_details', state='*')
-    dp.register_callback_query_handler(lambda c: process_back_to_achievements(c, bot), lambda c: c.data == 'back_to_achievements', state='*')
-    dp.register_callback_query_handler(lambda c: process_back(c, bot), lambda c: c.data == 'back', state='*')
-    dp.register_callback_query_handler(lambda c: process_approve_achievements(c, bot), lambda c: c.data == 'approve_achievements', state='*')
-    dp.register_callback_query_handler(lambda c, state: process_view_approval_details(c, state, bot), lambda c: c.data == 'approve', state='*')
-    dp.register_callback_query_handler(lambda c, state: process_reject_approval(c, state, bot), lambda c: c.data == 'reject', state='*')
-    dp.register_callback_query_handler(lambda c: process_back_to_approvals(c, bot), lambda c: c.data == 'back_to_approvals', state='*')
+    dp.register_callback_query_handler(partial(process_add_achievement, bot=bot), lambda c: c.data == 'add_achievement', state=AuthState.authorized)
+    dp.register_callback_query_handler(partial(process_delete_achievement, bot=bot), lambda c: c.data == 'delete_achievement', state=AuthState.authorized)
+    dp.register_callback_query_handler(partial(process_view_achievements, bot=bot), lambda c: c.data == 'view_achievements', state=AuthState.authorized)
+    dp.register_callback_query_handler(partial(process_view_achievement_details, bot=bot), lambda c: c.data == 'view_achievement_details', state=AuthState.authorized)
+
+    dp.register_callback_query_handler(partial(process_back_to_achievements, bot=bot),
+                                       lambda c: c.data == 'back_to_achievements', state=AuthState.authorized)
+    dp.register_callback_query_handler(partial(process_back_to_achievements, bot=bot),
+                                       lambda c: c.data == 'back_to_achievements', state=ViewAchievement)
+
+    dp.register_callback_query_handler(partial(process_back_to_main_menu, bot=bot),
+                                       lambda c: c.data == 'back_to_main_menu', state=AuthState.authorized)
+    dp.register_callback_query_handler(partial(process_back_to_main_menu, bot=bot),
+                                       lambda c: c.data == 'back_to_main_menu', state=AddAchievement)
+    dp.register_callback_query_handler(partial(process_back_to_main_menu, bot=bot),
+                                       lambda c: c.data == 'back_to_main_menu', state=DeleteAchievement)
+    dp.register_callback_query_handler(partial(process_back_to_main_menu, bot=bot),
+                                       lambda c: c.data == 'back_to_main_menu', state=ViewAchievement)
+    dp.register_callback_query_handler(partial(process_back_to_main_menu, bot=bot),
+                                       lambda c: c.data == 'back_to_main_menu', state=ApproveAchievement)
+
+    dp.register_callback_query_handler(lambda c: process_approve_achievements(c, bot), lambda c: c.data == 'approve_achievements', state=AuthState.authorized)
+    dp.register_callback_query_handler(lambda c, state: process_view_approval_details(c, state, bot), lambda c: c.data == 'approve', state=ApproveAchievement.viewing_achievement)
+    dp.register_callback_query_handler(lambda c, state: process_reject_approval(c, state, bot), lambda c: c.data == 'reject', state=ApproveAchievement.viewing_achievement)
+    dp.register_callback_query_handler(partial(process_back_to_approvals, bot=bot), lambda c: c.data == 'back_to_approvals', state=ApproveAchievement.viewing_achievement)
     dp.register_message_handler(lambda msg, state: process_achievement_description(msg, state, bot), state=AddAchievement.waiting_for_description)
     dp.register_message_handler(lambda msg, state: process_achievement_files(msg, state, bot), content_types=['document', 'photo'], state=AddAchievement.waiting_for_files)
     dp.register_message_handler(done_adding_files, commands=['done'], state=AddAchievement.waiting_for_files)
@@ -44,13 +60,23 @@ def trim_description(description):
         return description[:27] + "..."
     return description
 
-async def send_welcome(message: types.Message):
-    await message.reply("Добро пожаловать! Выберите действие:", reply_markup=get_main_menu())
+async def process_add_achievement(callback_query: types.CallbackQuery, state: FSMContext, bot: Bot):
+    # Здесь предполагается, что данные пользователя были ранее сохранены в состоянии
+    user = await state.get_data()
+    full_name = user.get('full_name')
+    group_number = user.get('group_number')
 
-async def process_add_achievement(callback_query: types.CallbackQuery, bot: Bot):
+    # Проверяем, если данные отсутствуют, то выводим ошибку
+    if not full_name or not group_number:
+        await bot.send_message(callback_query.from_user.id, "Ошибка: данные пользователя не найдены. Пожалуйста, авторизуйтесь заново.", reply_markup=get_auth_menu())
+        return
+
+    await state.update_data(full_name=full_name, group_number=group_number)
     await bot.send_message(callback_query.from_user.id, "Введите описание достижения (до 1000 символов):", reply_markup=get_back_menu())
     await bot.answer_callback_query(callback_query.id)
     await AddAchievement.waiting_for_description.set()
+
+
 
 async def process_achievement_description(message: types.Message, state: FSMContext, bot: Bot):
     description = message.text
@@ -76,11 +102,20 @@ async def process_achievement_files(message: types.Message, state: FSMContext, b
 
 async def done_adding_files(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
-    description = user_data['description']
-    files = user_data['files']
-    add_achievement(description, files)
+    description = user_data.get('description')
+    files = user_data.get('files', [])
+    full_name = user_data.get('full_name')
+    group_number = user_data.get('group_number')
+
+    # Проверяем, если данные отсутствуют, то выводим ошибку
+    if not description or not full_name or not group_number:
+        await message.reply("Ошибка: не все данные найдены. Пожалуйста, попробуйте заново.", reply_markup=get_main_menu())
+        return
+
+    add_achievement(description, files, group_number, full_name)
     await message.reply("Достижение добавлено!", reply_markup=get_main_menu())
-    await state.finish()
+    await state.set_state(AuthState.authorized)
+
 
 async def process_delete_achievement(callback_query: types.CallbackQuery, bot: Bot):
     achievements = get_achievements()
@@ -109,7 +144,7 @@ async def process_achievement_number(message: types.Message, state: FSMContext, 
             achievement_id = achievements[number - 1].id
             delete_achievement(achievement_id)
             await message.reply("Достижение удалено!", reply_markup=get_main_menu())
-            await state.finish()
+            await state.set_state(AuthState.authorized)
     except ValueError:
         achievements = get_achievements()
         response = "Список достижений:\n"
@@ -178,6 +213,7 @@ async def process_approve_achievements(callback_query: types.CallbackQuery, bot:
     achievements = get_pending_achievements()
     if not achievements:
         await bot.send_message(callback_query.from_user.id, "Нет достижений для подтверждения.", reply_markup=get_main_menu())
+        await AuthState.authorized.set()
     else:
         response = "Список достижений на рассмотрении:\n"
         for i, ach in enumerate(achievements, 1):
@@ -222,7 +258,11 @@ async def process_view_approval_details(callback_query: types.CallbackQuery, sta
     update_achievement_status(achievement_id, 'Подтверждено')
     await bot.send_message(callback_query.from_user.id, "Достижение подтверждено!")
     await process_approve_achievements(callback_query, bot)
-    await state.finish()
+    achievements = get_pending_achievements()
+    if not achievements:
+        await AuthState.authorized.set()
+    else:
+        await ApproveAchievement.waiting_for_number.set()
     await callback_query.answer()
 
 async def process_reject_approval(callback_query: types.CallbackQuery, state: FSMContext, bot: Bot):
@@ -231,7 +271,11 @@ async def process_reject_approval(callback_query: types.CallbackQuery, state: FS
     update_achievement_status(achievement_id, 'Отклонено')
     await bot.send_message(callback_query.from_user.id, "Достижение отклонено.")
     await process_approve_achievements(callback_query, bot)
-    await state.finish()
+    achievements = get_pending_achievements()
+    if not achievements:
+        await AuthState.authorized.set()
+    else:
+        await ApproveAchievement.waiting_for_number.set()
     await callback_query.answer()
 
 async def process_back_to_approvals(callback_query: types.CallbackQuery, bot: Bot):
@@ -246,9 +290,10 @@ async def process_back_to_achievements(callback_query: types.CallbackQuery, bot:
         for i, ach in enumerate(achievements, 1):
             response += f"{i}. {trim_description(ach.description)}\n"
         await bot.send_message(callback_query.from_user.id, response, reply_markup=get_view_achievements_menu())
-    await ViewAchievement.waiting_for_number.set()
+    await AuthState.authorized.set()
     await callback_query.answer()
 
-async def process_back(callback_query: types.CallbackQuery, bot: Bot):
+async def process_back_to_main_menu(callback_query: types.CallbackQuery, state: FSMContext, bot: Bot):
     await bot.send_message(callback_query.from_user.id, "Выберите действие:", reply_markup=get_main_menu())
     await callback_query.answer()
+    await state.set_state(AuthState.authorized)
