@@ -2,7 +2,7 @@ from aiogram import Bot, types, Dispatcher
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from database import add_achievement, delete_achievement, get_achievements, get_pending_achievements, update_achievement_status
-from keyboards import get_main_menu, get_back_menu, get_view_achievements_menu, get_back_to_achievements_menu, get_approval_menu, get_auth_menu
+from keyboards import get_main_menu, get_back_menu, get_view_achievements_menu, get_back_to_achievements_menu, get_approval_menu, get_auth_menu,get_main_menu_student, get_main_menu_admin
 from models import Achievement
 from functools import partial
 from handlers.auth_handlers import AuthState
@@ -106,21 +106,23 @@ async def done_adding_files(message: types.Message, state: FSMContext):
     files = user_data.get('files', [])
     full_name = user_data.get('full_name')
     group_number = user_data.get('group_number')
+    user_data = await state.get_data()
 
     # Проверяем, если данные отсутствуют, то выводим ошибку
     if not description or not full_name or not group_number:
-        await message.reply("Ошибка: не все данные найдены. Пожалуйста, попробуйте заново.", reply_markup=get_main_menu())
+        await message.reply("Ошибка: не все данные найдены. Пожалуйста, попробуйте заново.", reply_markup=get_main_menu(user_data))
         return
 
     add_achievement(description, files, group_number, full_name)
-    await message.reply("Достижение добавлено!", reply_markup=get_main_menu())
+    await message.reply("Достижение добавлено!", reply_markup=get_main_menu(user_data))
     await state.set_state(AuthState.authorized)
 
 
-async def process_delete_achievement(callback_query: types.CallbackQuery, bot: Bot):
+async def process_delete_achievement(callback_query: types.CallbackQuery,state: FSMContext, bot: Bot):
+    user_data = await state.get_data()
     achievements = get_achievements()
     if not achievements:
-        await bot.send_message(callback_query.from_user.id, "Нет достижений для удаления.", reply_markup=get_main_menu())
+        await bot.send_message(callback_query.from_user.id, "Нет достижений для удаления.", reply_markup=get_main_menu(user_data))
     else:
         response = "Список достижений:\n"
         for i, ach in enumerate(achievements, 1):
@@ -131,6 +133,7 @@ async def process_delete_achievement(callback_query: types.CallbackQuery, bot: B
         await DeleteAchievement.waiting_for_number.set()
 
 async def process_achievement_number(message: types.Message, state: FSMContext, bot: Bot):
+    user_data = await state.get_data()
     try:
         number = int(message.text)
         achievements = get_achievements()
@@ -143,7 +146,7 @@ async def process_achievement_number(message: types.Message, state: FSMContext, 
         else:
             achievement_id = achievements[number - 1].id
             delete_achievement(achievement_id)
-            await message.reply("Достижение удалено!", reply_markup=get_main_menu())
+            await message.reply("Достижение удалено!", reply_markup=get_main_menu(user_data))
             await state.set_state(AuthState.authorized)
     except ValueError:
         achievements = get_achievements()
@@ -212,7 +215,7 @@ async def process_view_achievement_number(message: types.Message, state: FSMCont
 async def process_approve_achievements(callback_query: types.CallbackQuery, bot: Bot):
     achievements = get_pending_achievements()
     if not achievements:
-        await bot.send_message(callback_query.from_user.id, "Нет достижений для подтверждения.", reply_markup=get_main_menu())
+        await bot.send_message(callback_query.from_user.id, "Нет достижений для подтверждения.", reply_markup=get_main_menu_admin())
         await AuthState.authorized.set()
     else:
         response = "Список достижений на рассмотрении:\n"
@@ -281,10 +284,11 @@ async def process_reject_approval(callback_query: types.CallbackQuery, state: FS
 async def process_back_to_approvals(callback_query: types.CallbackQuery, bot: Bot):
     await process_approve_achievements(callback_query, bot)
 
-async def process_back_to_achievements(callback_query: types.CallbackQuery, bot: Bot):
+async def process_back_to_achievements(callback_query: types.CallbackQuery, state: FSMContext, bot: Bot):
+    user_data = await state.get_data()
     achievements = get_achievements()
     if not achievements:
-        await bot.send_message(callback_query.from_user.id, "Достижений нет.", reply_markup=get_main_menu())
+        await bot.send_message(callback_query.from_user.id, "Достижений нет.", reply_markup=get_main_menu(user_data))
     else:
         response = "Список достижений:\n"
         for i, ach in enumerate(achievements, 1):
@@ -294,6 +298,7 @@ async def process_back_to_achievements(callback_query: types.CallbackQuery, bot:
     await callback_query.answer()
 
 async def process_back_to_main_menu(callback_query: types.CallbackQuery, state: FSMContext, bot: Bot):
-    await bot.send_message(callback_query.from_user.id, "Выберите действие:", reply_markup=get_main_menu())
+    user_data = await state.get_data()
+    await bot.send_message(callback_query.from_user.id, "Выберите действие:", reply_markup=get_main_menu(user_data))
     await callback_query.answer()
     await state.set_state(AuthState.authorized)

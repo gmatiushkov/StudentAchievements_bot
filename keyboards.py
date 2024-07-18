@@ -1,12 +1,28 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-def get_main_menu():
-    return InlineKeyboardMarkup().add(
-        InlineKeyboardButton("Добавить достижение", callback_data='add_achievement'),
-        InlineKeyboardButton("Удалить достижение", callback_data='delete_achievement'),
-        InlineKeyboardButton("Просмотр всех достижений", callback_data='view_achievements'),
-        InlineKeyboardButton("Подтверждение достижений", callback_data='approve_achievements')
+def get_main_menu_student():
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard.add(
+        InlineKeyboardButton(text="Добавить достижение", callback_data="add_achievement"),
+        InlineKeyboardButton(text="Удалить достижение", callback_data="delete_achievement"),
+        InlineKeyboardButton(text="Просмотр достижений", callback_data="view_achievements")
     )
+    return keyboard
+
+def get_main_menu_admin():
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard.add(
+        InlineKeyboardButton(text="Просмотр достижений", callback_data="view_achievements"),
+        InlineKeyboardButton(text="Удалить достижение", callback_data="delete_achievement"),
+        InlineKeyboardButton(text="Подтверждение достижений", callback_data="approve_achievements")
+    )
+    return keyboard
+def get_main_menu(user_data):
+    is_admin = user_data.get('is_admin', False)
+    if is_admin:
+        return get_main_menu_admin()
+    else:
+        return get_main_menu_student()
 
 def get_back_menu():
     return InlineKeyboardMarkup().add(
